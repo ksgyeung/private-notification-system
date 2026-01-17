@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # MySQL Database Service
+  mysql:
+    image: mysql:8.0
+    container_name: notification-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_DATABASE: notifications
+      MYSQL_USER: notif_user
+      MYSQL_PASSWORD: notif_pass
+    ports:
+      - "3306:3306"
+    volumes:
+      # Persistent database storage
+      - mysql_data:/var/lib/mysql
+      # Initialize database schema
+      - ./src/main/resources/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    networks:
+      - notification-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "notif_user", "-pnotif_pass"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Spring Boot Application Service
+  notification-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notification-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      # Database connection
+      DB_USERNAME: notif_user
+      DB_PASSWORD: notif_pass
+      # Image storage configuration
+      IMAGE_STORAGE_PATH: /app/images
+      # Authentication token
+      BEARER_TOKEN: ${BEARER_TOKEN:-secure-default-token-change-in-production}
+      # JVM options for containerized environment
+      JAVA_OPTS: "-Xmx512m -Xms256m -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+    ports:
+      - "8080:8080"
+    volumes:
+      # Persistent image storage
+      - image_storage:/app/images
+    networks:
+      - notification-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+# Named volumes for data persistence
+volumes:
+  mysql_data:
+    driver: local
+  image_storage:
+    driver: local
+
+# Custom network for service communication
+networks:
+  notification-network:
+    driver: bridge
