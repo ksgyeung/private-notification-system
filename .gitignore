@@ -79,3 +79,5 @@ Thumbs.db
 # Application specific
 /images/
 /logs/
+
+.env.local
