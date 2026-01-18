@@ -2,9 +2,9 @@
 
 ## Overview
 
-The notification system is a Java 21 Spring Boot web application that provides a pull-based notification service. The system consists of two primary REST APIs: one for creating and storing notifications, and another for retrieving notifications on-demand. The application uses MySQL for persistent storage via Spring JPA, implements Bearer token authentication for security, and is fully containerized with Docker and Docker Compose for easy deployment.
+The notification system is a Java 21 Spring Boot web application that provides a pull-based notification service with advanced image handling capabilities. The system consists of three primary REST APIs: one for creating and storing notifications with multipart image upload, another for retrieving notifications using cursor-based pagination, and a third for serving images by UUID. The application uses MySQL with separate tables for notifications and images, implements Bearer token authentication for protected endpoints, converts all images to WebP format with UUID-based storage, and is fully containerized with Docker and Docker Compose for easy deployment.
 
-The system operates on a pull-based model where client devices fetch notifications when needed rather than receiving push notifications. Images associated with notifications are stored in the file system with configurable storage paths, while the database stores metadata and image filenames.
+The system operates on a pull-based model where client devices fetch notifications when needed rather than receiving push notifications. Images are automatically converted to WebP format and stored with UUID-based filenames to prevent conflicts and ensure consistent format. All API responses are wrapped in a StandardResponseDto for consistent client integration.
 
 ## Architecture
 
@@ -17,28 +17,39 @@ The application follows a layered Spring Boot architecture:
 │  │ NotificationCtrl│ │  HealthCtrl     ││
 │  │ /notification/* │ │  /healthcheck   ││
 │  └─────────────────┘ └─────────────────┘│
+│  ┌─────────────────┐                   ││
+│  │  ImageCtrl      │                   ││
+│  │  /image/{uuid}  │                   ││
+│  └─────────────────┘                   ││
 └─────────────────────────────────────────┘
                     │
 ┌─────────────────────────────────────────┐
 │           Security Layer                │
-│        Bearer Token Authentication      │
+│    Bearer Token Authentication Filter   │
+│    (excludes /healthcheck, /image/*)    │
 └─────────────────────────────────────────┘
                     │
 ┌─────────────────────────────────────────┐
 │            Service Layer                │
 │  ┌─────────────────┐ ┌─────────────────┐│
 │  │NotificationSvc  │ │  ImageService   ││
+│  │ (with WebP      │ │  (UUID-based    ││
+│  │  conversion)    │ │   storage)      ││
 │  └─────────────────┘ └─────────────────┘│
 └─────────────────────────────────────────┘
                     │
 ┌─────────────────────────────────────────┐
 │         Repository Layer                │
-│        Spring JPA Repositories          │
+│  ┌─────────────────┐ ┌─────────────────┐│
+│  │NotificationRepo │ │  ImageRepo      ││
+│  │(cursor pagination)│ │ (UUID lookup) ││
+│  └─────────────────┘ └─────────────────┘│
 └─────────────────────────────────────────┘
                     │
 ┌─────────────────────────────────────────┐
 │            MySQL Database               │
-│     notifications + notification_images │
+│     notifications + image tables        │
+│     (separate tables with FK)           │
 └─────────────────────────────────────────┘
 ```
 
@@ -65,10 +76,15 @@ The application follows a layered Spring Boot architecture:
 ### REST Controllers
 
 #### NotificationController
-- **POST /notification/create**: Creates and stores new notifications
-- **POST /notification/retrieve**: Retrieves notifications based on JSON parameters
+- **POST /notification/create**: Creates and stores new notifications with multipart form data (content, from, images)
+- **POST /notification/retrieve**: Retrieves notifications using cursor-based pagination with JSON request body
 - Both endpoints require Bearer token authentication
-- Accept and return JSON data
+- Returns StandardResponseDto wrapper with success status and data
+
+#### ImageController
+- **GET /image/{uuid}**: Serves images directly by UUID with proper content-type headers
+- No authentication required for easy client integration
+- Returns image file directly with appropriate headers
 
 #### HealthController
 - **GET /healthcheck**: Returns "ok" for Docker health checks
@@ -81,8 +97,11 @@ The application follows a layered Spring Boot architecture:
 ```java
 @Service
 public class NotificationService {
-    NotificationResponseDto createNotification(NotificationCreateDto request);
-    NotificationListResponseDto retrieveNotifications(NotificationRetrieveDto request);
+    @Transactional
+    NotificationResponseDto createNotification(String content, String from, List<MultipartFile> images);
+    
+    @Transactional(readOnly = true)
+    List<NotificationResponseDto> retrieveNotifications(NotificationRetrieveDto request);
 }
 ```
 
@@ -90,9 +109,12 @@ public class NotificationService {
 ```java
 @Service
 public class ImageService {
-    List<String> saveImages(List<MultipartFile> images);
+    @Transactional
+    Image save(Notification notification, MultipartFile multipartFile);
+    
     String getImagePath(String filename);
     boolean validateImageFile(MultipartFile file);
+    ImageDto getImageByUuid(String uuid);
 }
 ```
 
@@ -103,16 +125,19 @@ public class ImageService {
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
     List<Notification> findAllByOrderBySendOnDesc();
+    List<Notification> findByIdGreaterThenIdOrderByIdDesc(long id, Limit limit);
     Page<Notification> findAllByOrderBySendOnDesc(Pageable pageable);
 }
 ```
 
-#### NotificationImageRepository
+#### ImageRepository
 ```java
 @Repository
-public interface NotificationImageRepository extends JpaRepository<NotificationImage, Long> {
-    List<NotificationImage> findByNotificationId(Long notificationId);
-    void deleteByNotificationId(Long notificationId);
+public interface ImageRepository extends JpaRepository<Image, Integer> {
+    Optional<Image> findByUuid(String uuid);
+    Optional<Image> findByPath(String path);
+    List<Image> findByNotificationId(Long notificationId);
+    boolean existsByUuid(String uuid);
 }
 ```
 
@@ -155,20 +180,25 @@ public class Notification {
 }
 ```
 
-### NotificationImage Entity
+### Image Entity
 ```java
-@Entity
-@Table(name = "notification_images")
-public class NotificationImage {
+@Entity(name = "image")
+public class Image {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private int id;
     
-    @Column(name = "filepath", nullable = false)
-    private String filepath;
+    @Column
+    private String uuid;
     
-    @Column(name = "file_size")
-    private Long fileSize;
+    @Column(nullable = false)
+    private String path;
+    
+    @Column
+    private long size;
+    
+    @Column(name = "content_type", nullable = false)
+    private String contentType;
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "notification_id", nullable = false)
@@ -184,23 +214,17 @@ public class NotificationCreateDto {
     @NotBlank
     private String content;
     
-    @NotNull
-    private Long sendOn;
-    
     @NotBlank
     private String from;
     
-    private List<String> images; // Optional image filenames
+    private List<String> imageUuids; // Optional image UUIDs for reference
 }
 ```
 
 #### NotificationRetrieveDto
 ```java
 public class NotificationRetrieveDto {
-    private Integer limit;
-    private Integer offset;
-    private Long fromTimestamp;
-    private Long toTimestamp;
+    private long lastId; // Cursor-based pagination parameter
 }
 ```
 
@@ -209,9 +233,29 @@ public class NotificationRetrieveDto {
 public class NotificationResponseDto {
     private Long id;
     private String content;
-    private List<String> images;
+    private List<ImageDto> images;
     private Long sendOn;
     private String from;
+}
+```
+
+#### NotificationResponseDto2
+```java
+public class NotificationResponseDto2 {
+    private Long id;
+    private String content;
+    private List<String> images; // Full image URLs
+    private Long sendOn;
+    private String from;
+}
+```
+
+#### StandardResponseDto
+```java
+public class StandardResponseDto<T> {
+    private final boolean success;
+    private final String message;
+    private final T data;
 }
 ```
 
@@ -230,19 +274,23 @@ CREATE TABLE notifications (
 );
 
 CREATE INDEX idx_send_on ON notifications(send_on DESC);
+CREATE INDEX idx_id_desc ON notifications(id DESC);
 ```
 
-#### Notification Images Table
+#### Image Table
 ```sql
-CREATE TABLE notification_images (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+CREATE TABLE image (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    uuid VARCHAR(36) UNIQUE,
+    path VARCHAR(500) NOT NULL,
+    size BIGINT,
+    content_type VARCHAR(100) NOT NULL,
     notification_id BIGINT NOT NULL,
-    filepath VARCHAR(500) NOT NULL,
-    file_size BIGINT,
     FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_notification_id ON notification_images(notification_id);
+CREATE INDEX idx_uuid ON image(uuid);
+CREATE INDEX idx_notification_id ON image(notification_id);
 ```
 
 ### Configuration
@@ -261,9 +309,16 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.MySQL8Dialect
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 50MB
 
 notification:
-  image-storage-path: ${IMAGE_STORAGE_PATH:/app/images}
+  image:
+    storage-path: ${IMAGE_STORAGE_PATH:/app/images}
+    max-size: ${IMAGE_MAX_SIZE:10}  # MB
+  host-url: ${HOST_URL:http://localhost:8080/image/}
   auth:
     bearer-token: ${BEARER_TOKEN:default-token}
 
@@ -283,45 +338,57 @@ management:
 
 Based on the prework analysis and property reflection, the following properties ensure system correctness:
 
-### Property 1: Authentication enforcement
-*For any* API request to protected endpoints (/notification/create, /notification/retrieve), the request should be rejected with HTTP 401 if it lacks a valid Bearer token, and should be processed normally if it contains a valid Bearer token
+### Property 1: Authentication enforcement for protected endpoints
+*For any* request to protected endpoints (/notification/create, /notification/retrieve), the request should be rejected with HTTP 401 if it lacks a valid Bearer token, and should be processed normally if it contains a valid Bearer token
 **Validates: Requirements 1.1, 1.2, 1.3**
 
-### Property 2: Notification creation with unique identifiers
-*For any* valid notification creation request, the system should create a notification with a unique ID that doesn't conflict with existing notifications
+### Property 2: Unique notification creation
+*For any* valid multipart form request to create a notification, the system should create a notification with a unique ID that doesn't conflict with existing notifications
 **Validates: Requirements 2.1**
 
 ### Property 3: Required field validation
-*For any* notification creation request missing required fields (content, from, sendOn), the system should reject the request with specific validation errors
-**Validates: Requirements 2.2, 8.2**
+*For any* notification creation request missing required fields (content, from), the system should reject the request with specific validation errors
+**Validates: Requirements 2.2, 9.2**
 
-### Property 4: Image storage consistency
-*For any* notification created with images, the image files should be stored in the configured folder and the filenames should be saved in the database notification record
-**Validates: Requirements 2.3, 10.2**
+### Property 4: Image processing and storage consistency
+*For any* valid image uploaded with a notification, the system should convert it to WebP format, store it with a UUID-based filename, and create a corresponding database record with proper metadata
+**Validates: Requirements 2.3, 2.4, 9.5, 9.6**
 
-### Property 5: Timestamp preservation
-*For any* notification creation request, the send_on timestamp provided should be stored exactly as provided in the database
-**Validates: Requirements 2.4**
+### Property 5: Automatic timestamp generation
+*For any* notification creation request, the system should automatically set the send_on timestamp to the current Unix epoch time
+**Validates: Requirements 2.5**
 
-### Property 6: Parameterized retrieval
-*For any* notification retrieve request with filtering parameters, all returned notifications should match the specified criteria (timestamp ranges, limits, offsets)
+### Property 6: Image validation and rejection
+*For any* image file that exceeds size limits or has invalid format, the system should reject the request with appropriate validation errors
+**Validates: Requirements 2.7**
+
+### Property 7: Cursor-based pagination
+*For any* notification retrieve request with a lastId parameter, the system should return up to 50 notifications with IDs greater than the provided lastId
 **Validates: Requirements 3.1**
 
-### Property 7: Chronological ordering
-*For any* notification retrieve request, the returned notifications should be ordered by send_on timestamp in descending order (newest first)
+### Property 8: Chronological ordering
+*For any* notification retrieve request, the returned notifications should be ordered by ID in descending order (newest first)
 **Validates: Requirements 3.2**
 
-### Property 8: Response completeness
-*For any* notification in a retrieve response, the notification should include all required fields: id, content, images array, send_on timestamp, and from field
-**Validates: Requirements 3.3**
+### Property 9: Response format with image URLs
+*For any* notification in a retrieve response, the notification should be returned as NotificationResponseDto2 with full image URLs constructed using the configured host URL
+**Validates: Requirements 3.3, 3.6**
 
-### Property 9: Persistence round-trip
-*For any* notification created through the API, querying the database should return the same notification data that was originally submitted
-**Validates: Requirements 5.1**
+### Property 10: Image serving by UUID
+*For any* valid UUID provided to the /image/{uuid} endpoint, the system should return the corresponding image file with proper content-type headers, and return HTTP 404 for invalid UUIDs
+**Validates: Requirements 5.2, 5.3**
 
-### Property 10: Content length validation
-*For any* notification creation request with content exceeding the maximum allowed length, the system should reject the request with a validation error
-**Validates: Requirements 8.1**
+### Property 11: Database persistence consistency
+*For any* notification created and any image uploaded, the data should be properly persisted to the MySQL database with correct entity relationships and retrievable through JPA repositories
+**Validates: Requirements 6.1, 6.2**
+
+### Property 12: StandardResponseDto wrapper
+*For any* API response from protected endpoints, the response should be wrapped in StandardResponseDto containing success boolean, message string, and data object
+**Validates: Requirements 7.4**
+
+### Property 13: Content length validation
+*For any* notification creation request with content exceeding 10000 characters, the system should reject the request with a validation error
+**Validates: Requirements 9.1**
 
 ## Error Handling
 

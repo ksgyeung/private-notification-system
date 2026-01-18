@@ -4,13 +4,19 @@ import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.luciad.imageio.webp.WebPReadParam;
 
+import cx.ksg.notificationserver.dto.ImageDto;
+import cx.ksg.notificationserver.entity.Image;
+import cx.ksg.notificationserver.entity.Notification;
 import cx.ksg.notificationserver.exception.InvalidImageException;
+import cx.ksg.notificationserver.repository.ImageRepository;
+import jakarta.transaction.Transactional;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -62,62 +68,54 @@ public class ImageService implements InitializingBean {
     @Value("${notification.image.storage-path}")
     private String imageStoragePath;
 
-    /**
-     * Saves multiple image files to the configured storage directory.
-     * 
-     * This method:
-     * - Creates the storage directory if it doesn't exist
-     * - Validates each image file
-     * - Generates unique filenames to prevent conflicts
-     * - Saves files to the storage directory
-     * - Returns list of saved filenames for database storage
-     * 
-     * @param images List of MultipartFile objects representing uploaded images
-     * @return List of saved filenames (without full path) for database storage
-     * @throws RuntimeException if file operations fail
-     */
-    public List<String> saveImages(List<MultipartFile> images) throws IOException, InvalidImageException {
-        if (images == null || images.isEmpty()) {
-            return Collections.emptyList();
+    @Autowired
+    private ImageRepository imageRepository;
+
+    @Transactional
+    Image save(Notification notification, MultipartFile multipartFile) throws IOException, InvalidImageException
+    {
+        if (multipartFile == null || multipartFile.isEmpty()) {
+            throw new IllegalArgumentException("image is null or empty");
         }
 
-        List<String> savedFilenames = new ArrayList<>();
-        
-        for (MultipartFile image : images) {
-            if (image != null && !image.isEmpty()) {
-                // Validate the image file
-                if (!validateImageFile(image)) {
-                    logger.warn("Invalid image file rejected: {}", image.getOriginalFilename());
-                    throw new InvalidImageException("image is not valid " + image.getOriginalFilename());
-                }
+        // Validate the image file
+        if (!validateImageFile(multipartFile)) {
+            logger.warn("Invalid image file rejected: {}", multipartFile.getOriginalFilename());
+            throw new InvalidImageException("image is not valid " + multipartFile.getOriginalFilename());
+        }
 
-                BufferedImage bufferedImage;
-                try(InputStream is = image.getInputStream())
-                {
-                    bufferedImage = ImageIO.read(is);
-                }
+        BufferedImage bufferedImage;
+        try(InputStream is = multipartFile.getInputStream())
+        {
+            bufferedImage = ImageIO.read(is);
+        }
 
-                // Generate unique filename
-                String filename = generateUniqueFilename(image.getOriginalFilename(), "webp");
+        // Generate unique filename
+        String filename = generateUniqueFilename(multipartFile.getOriginalFilename(), "webp");
 
-                byte[] webpBytes;
-                try(ByteArrayOutputStream baos = new ByteArrayOutputStream())
-                {
-                    ImageIO.write(bufferedImage, "webp", baos);
-                    webpBytes = baos.toByteArray();
-                }
-                
-                // Save the file
-                Path targetPath = Paths.get(imageStoragePath, filename);
-                FileUtils.writeByteArrayToFile(targetPath.toFile(), webpBytes);
-                
-                savedFilenames.add(filename);
-                logger.info("Successfully saved image: {}", filename);
-            }
+        byte[] webpBytes;
+        try(ByteArrayOutputStream baos = new ByteArrayOutputStream())
+        {
+            ImageIO.write(bufferedImage, "webp", baos);
+            webpBytes = baos.toByteArray();
         }
         
-        return savedFilenames;
+        // Save the file
+        Path targetPath = Paths.get(imageStoragePath, filename);
+        FileUtils.writeByteArrayToFile(targetPath.toFile(), webpBytes);
+        
+        logger.info("Successfully saved image: {}", filename);
+
+        Image image = new Image();
+        image.setPath(filename);
+        image.setSize(webpBytes.length);
+        image.setContentType("image/webp");
+        image.setNotification(notification);
+
+        image = imageRepository.save(image);
+        return image;
     }
+
 
     /**
      * Gets the full file system path to an image file.
@@ -217,10 +215,20 @@ public class ImageService implements InitializingBean {
         return FileUtils.sizeOf(new File(path));
     }
 
+    public ImageDto getImageByUuid(String uuid)
+    {
+        var image = imageRepository.findByUuid(uuid);
+        if(image.isEmpty())
+        {
+            return null;
+        }
+        return ImageDto.fromImage(image.get());
+    }
+
     @Override
     public void afterPropertiesSet() throws Exception {
         File file = new File(imageStoragePath);
-        if(!file.isDirectory() || !file.canWrite() || !.file.canRead())
+        if(!file.isDirectory() || !file.canWrite() || !file.canRead())
         {
             throw new IllegalArgumentException("image storage path problem " + imageStoragePath);
         }

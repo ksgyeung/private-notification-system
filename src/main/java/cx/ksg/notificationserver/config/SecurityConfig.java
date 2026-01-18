@@ -54,6 +54,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 // Allow health check endpoints without authentication
                 .requestMatchers("/healthcheck").permitAll()
+
+                .requestMatchers("/image/**").authenticated()
                 
                 // Require authentication for all notification endpoints
                 .requestMatchers("/notification/**").authenticated()

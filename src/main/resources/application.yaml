@@ -26,6 +26,8 @@ notification:
     storage-path: ${IMAGE_STORAGE_PATH:/app/images}
   auth:
     bearer-token: ${BEARER_TOKEN:default-token}
+  host-url:
+    ${HOST_URL:http://127.0.0.1:8080}
 
 server:
   port: 8080

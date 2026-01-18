@@ -1,6 +1,8 @@
 package cx.ksg.notificationserver.repository;
 
 import cx.ksg.notificationserver.entity.Notification;
+
+import org.springframework.data.domain.Limit;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -99,4 +101,6 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
      * @return Page of notifications up to the specified timestamp
      */
     Page<Notification> findBySendOnLessThanEqualOrderBySendOnDesc(Long toTimestamp, Pageable pageable);
+
+    List<Notification> findByIdGreaterThenIdOrderByIdDesc(long id, Limit limit);
 }

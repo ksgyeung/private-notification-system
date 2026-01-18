@@ -40,7 +40,7 @@ public class Notification {
     private LocalDateTime createdAt;
 
     @OneToMany(mappedBy = "notification", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<NotificationImage> images;
+    private List<Image> images;
 
     // Default constructor
     public Notification() {
@@ -94,11 +94,11 @@ public class Notification {
         this.createdAt = createdAt;
     }
 
-    public List<NotificationImage> getImages() {
+    public List<Image> getImages() {
         return images;
     }
 
-    public void setImages(List<NotificationImage> images) {
+    public void setImages(List<Image> images) {
         this.images = images;
     }
 

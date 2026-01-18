@@ -1,16 +1,9 @@
 package cx.ksg.notificationserver.dto;
 
-import cx.ksg.notificationserver.entity.Notification;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/**
- * Data Transfer Object for notification responses.
- * Contains all fields returned when retrieving notifications from the API.
- * 
- * Requirements: 3.3, 6.3
- */
-public class NotificationResponseDto {
+public class NotificationResponseDto2 {
 
     /**
      * Unique identifier of the notification.
@@ -28,7 +21,7 @@ public class NotificationResponseDto {
      * List of image filenames associated with the notification.
      * Empty list if no images are attached.
      */
-    private List<ImageDto> images;
+    private List<String> images;
 
     /**
      * Unix epoch timestamp indicating when the notification should be sent.
@@ -43,11 +36,11 @@ public class NotificationResponseDto {
     private String from;
 
     // Default constructor
-    public NotificationResponseDto() {
+    public NotificationResponseDto2() {
     }
 
     // Constructor with all fields
-    public NotificationResponseDto(Long id, String content, List<ImageDto> images, Long sendOn, String from) {
+    public NotificationResponseDto2(Long id, String content, List<String> images, Long sendOn, String from) {
         this.id = id;
         this.content = content;
         this.images = images;
@@ -55,16 +48,13 @@ public class NotificationResponseDto {
         this.from = from;
     }
 
-    public static NotificationResponseDto fromNotification(Notification notification) {
-        List<ImageDto> imageDtos = notification.getImages().stream()
-            .map(ImageDto::fromImage).toList();
-        
-        return new NotificationResponseDto(
-            notification.getId(),
-            notification.getContent(),
-            imageDtos,
-            notification.getSendOn(),
-            notification.getFrom()
+    public static NotificationResponseDto2 fromNotificationResponseDto(String hostUrl, NotificationResponseDto responseDto) {
+        return new NotificationResponseDto2(
+            responseDto.getId(),
+            responseDto.getContent(),
+            responseDto.getImages().stream().map(x -> hostUrl + x.getFilename()).toList(),
+            responseDto.getSendOn(),
+            responseDto.getFrom()
         );
     }
 
@@ -85,11 +75,11 @@ public class NotificationResponseDto {
         this.content = content;
     }
 
-    public List<ImageDto> getImages() {
+    public List<String> getImages() {
         return images;
     }
 
-    public void setImages(List<ImageDto> images) {
+    public void setImages(List<String> images) {
         this.images = images;
     }
 

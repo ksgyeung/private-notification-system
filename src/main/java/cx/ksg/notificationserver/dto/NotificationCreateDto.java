@@ -2,56 +2,38 @@ package cx.ksg.notificationserver.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Size;
 import java.util.List;
 
 /**
  * Data Transfer Object for creating notifications.
- * Contains all required fields and validation constraints for notification creation.
+ * Contains all required fields for notification creation.
  */
 public class NotificationCreateDto {
 
-    /**
-     * The notification content/message.
-     * Required field with maximum length validation.
-     */
-    @NotBlank(message = "Content is required and cannot be blank")
-    @Size(max = 10000, message = "Content cannot exceed 10000 characters")
+    @NotBlank(message = "Content cannot be blank")
     private String content;
 
-    /**
-     * Unix epoch timestamp indicating when the notification should be sent.
-     * Required field.
-     */
-    @NotNull(message = "Send timestamp (sendOn) is required")
+    @NotNull(message = "Send on timestamp is required")
     private Long sendOn;
 
-    /**
-     * Sender information identifying who created the notification.
-     * Required field.
-     */
-    @NotBlank(message = "From field is required and cannot be blank")
+    @NotBlank(message = "From field cannot be blank")
     private String from;
 
-    /**
-     * Optional list of image filenames associated with the notification.
-     * Can be null or empty if no images are attached.
-     */
-    private List<String> images;
+    private List<String> imageUuids;
 
     // Default constructor
     public NotificationCreateDto() {
     }
 
     // Constructor with all fields
-    public NotificationCreateDto(String content, Long sendOn, String from, List<String> images) {
+    public NotificationCreateDto(String content, Long sendOn, String from, List<String> imageUuids) {
         this.content = content;
         this.sendOn = sendOn;
         this.from = from;
-        this.images = images;
+        this.imageUuids = imageUuids;
     }
 
-    // Getters and setters
+    // Getters and Setters
     public String getContent() {
         return content;
     }
@@ -76,12 +58,12 @@ public class NotificationCreateDto {
         this.from = from;
     }
 
-    public List<String> getImages() {
-        return images;
+    public List<String> getImageUuids() {
+        return imageUuids;
     }
 
-    public void setImages(List<String> images) {
-        this.images = images;
+    public void setImageUuids(List<String> imageUuids) {
+        this.imageUuids = imageUuids;
     }
 
     @Override
@@ -90,7 +72,7 @@ public class NotificationCreateDto {
                 "content='" + content + '\'' +
                 ", sendOn=" + sendOn +
                 ", from='" + from + '\'' +
-                ", images=" + images +
+                ", imageUuids=" + imageUuids +
                 '}';
     }
 }
