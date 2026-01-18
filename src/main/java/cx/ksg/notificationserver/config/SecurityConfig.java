@@ -54,7 +54,6 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 // Allow health check endpoints without authentication
                 .requestMatchers("/healthcheck").permitAll()
-                .requestMatchers("/actuator/health/**").permitAll()
                 
                 // Require authentication for all notification endpoints
                 .requestMatchers("/notification/**").authenticated()
@@ -70,8 +69,12 @@ public class SecurityConfig {
             .formLogin(AbstractHttpConfigurer::disable)
             
             // Disable HTTP Basic authentication
-            .httpBasic(AbstractHttpConfigurer::disable);
+            .httpBasic(AbstractHttpConfigurer::disable)
 
+            // disable csrf
+            .csrf(x -> x.disable())
+
+            ;
         return http.build();
     }
 }
