@@ -92,9 +92,11 @@ public class NotificationService {
                         // Create NotificationImage entity
                         // Note: We assume images are already saved by ImageService before this call
                         // The DTO contains the filenames returned by ImageService.saveImages()
+                        long fileSize = imageService.getImageFileSize(imageService.getImagePath(imageFilename));
+
                         NotificationImage imageEntity = new NotificationImage(
                             imageFilename,
-                            null, // File size can be determined later if needed
+                            fileSize, // File size can be determined later if needed
                             savedNotification
                         );
                         imageEntities.add(imageEntity);

@@ -212,6 +212,11 @@ public class ImageService implements InitializingBean {
         return filename.substring(lastDotIndex + 1);
     }
 
+    public long getImageFileSize(String path)
+    {
+        return FileUtils.sizeOf(new File(path));
+    }
+
     @Override
     public void afterPropertiesSet() throws Exception {
         File file = new File(imageStoragePath);
