@@ -1,17 +1,31 @@
 package cx.ksg.notificationserver.service;
 
+import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.luciad.imageio.webp.WebPReadParam;
+
+import cx.ksg.notificationserver.exception.InvalidImageException;
+
+import java.awt.Color;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import javax.imageio.ImageIO;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -32,7 +46,7 @@ import java.util.UUID;
  * Requirements: 2.3, 10.1, 10.2, 10.3
  */
 @Service
-public class ImageService {
+public class ImageService implements InitializingBean {
 
     private static final Logger logger = LoggerFactory.getLogger(ImageService.class);
 
@@ -42,9 +56,10 @@ public class ImageService {
     );
 
     // Maximum file size in bytes (10MB as configured in application.yaml)
-    private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+    @Value("${notification.image.max-size * 1024 * 1024}")
+    private long maxFileSize;
 
-    @Value("${notification.image-storage-path}")
+    @Value("${notification.image.storage-path}")
     private String imageStoragePath;
 
     /**
@@ -61,40 +76,44 @@ public class ImageService {
      * @return List of saved filenames (without full path) for database storage
      * @throws RuntimeException if file operations fail
      */
-    public List<String> saveImages(List<MultipartFile> images) {
+    public List<String> saveImages(List<MultipartFile> images) throws IOException, InvalidImageException {
         if (images == null || images.isEmpty()) {
-            return new ArrayList<>();
+            return Collections.emptyList();
         }
 
         List<String> savedFilenames = new ArrayList<>();
         
-        try {
-            // Ensure storage directory exists
-            createStorageDirectoryIfNotExists();
-            
-            for (MultipartFile image : images) {
-                if (image != null && !image.isEmpty()) {
-                    // Validate the image file
-                    if (!validateImageFile(image)) {
-                        logger.warn("Invalid image file rejected: {}", image.getOriginalFilename());
-                        continue;
-                    }
-                    
-                    // Generate unique filename
-                    String filename = generateUniqueFilename(image.getOriginalFilename());
-                    
-                    // Save the file
-                    Path targetPath = Paths.get(imageStoragePath, filename);
-                    Files.copy(image.getInputStream(), targetPath, StandardCopyOption.REPLACE_EXISTING);
-                    
-                    savedFilenames.add(filename);
-                    logger.info("Successfully saved image: {}", filename);
+        for (MultipartFile image : images) {
+            if (image != null && !image.isEmpty()) {
+                // Validate the image file
+                if (!validateImageFile(image)) {
+                    logger.warn("Invalid image file rejected: {}", image.getOriginalFilename());
+                    throw new InvalidImageException("image is not valid " + image.getOriginalFilename());
                 }
+
+                BufferedImage bufferedImage;
+                try(InputStream is = image.getInputStream())
+                {
+                    bufferedImage = ImageIO.read(is);
+                }
+
+                // Generate unique filename
+                String filename = generateUniqueFilename(image.getOriginalFilename(), "webp");
+
+                byte[] webpBytes;
+                try(ByteArrayOutputStream baos = new ByteArrayOutputStream())
+                {
+                    ImageIO.write(bufferedImage, "webp", baos);
+                    webpBytes = baos.toByteArray();
+                }
+                
+                // Save the file
+                Path targetPath = Paths.get(imageStoragePath, filename);
+                FileUtils.writeByteArrayToFile(targetPath.toFile(), webpBytes);
+                
+                savedFilenames.add(filename);
+                logger.info("Successfully saved image: {}", filename);
             }
-            
-        } catch (IOException e) {
-            logger.error("Failed to save images", e);
-            throw new RuntimeException("Failed to save images: " + e.getMessage(), e);
         }
         
         return savedFilenames;
@@ -134,8 +153,8 @@ public class ImageService {
         }
 
         // Check file size
-        if (file.getSize() > MAX_FILE_SIZE) {
-            logger.debug("File size {} exceeds maximum allowed size {}", file.getSize(), MAX_FILE_SIZE);
+        if (file.getSize() > maxFileSize) {
+            logger.debug("File size {} exceeds maximum allowed size {}", file.getSize(), maxFileSize);
             return false;
         }
 
@@ -163,26 +182,13 @@ public class ImageService {
     }
 
     /**
-     * Creates the storage directory if it doesn't exist.
-     * 
-     * @throws IOException if directory creation fails
-     */
-    private void createStorageDirectoryIfNotExists() throws IOException {
-        Path storagePath = Paths.get(imageStoragePath);
-        if (!Files.exists(storagePath)) {
-            Files.createDirectories(storagePath);
-            logger.info("Created image storage directory: {}", imageStoragePath);
-        }
-    }
-
-    /**
      * Generates a unique filename to prevent conflicts.
      * 
      * @param originalFilename The original filename from the uploaded file
      * @return A unique filename with UUID prefix
      */
-    private String generateUniqueFilename(String originalFilename) {
-        String extension = getFileExtension(originalFilename);
+    private String generateUniqueFilename(String originalFilename, String extension) {
+        // String extension = getFileExtension(originalFilename);
         String uuid = UUID.randomUUID().toString();
         return uuid + "." + extension;
     }
@@ -204,5 +210,14 @@ public class ImageService {
         }
         
         return filename.substring(lastDotIndex + 1);
+    }
+
+    @Override
+    public void afterPropertiesSet() throws Exception {
+        File file = new File(imageStoragePath);
+        if(!file.isDirectory() || !file.canWrite() || !.file.canRead())
+        {
+            throw new IllegalArgumentException("image storage path problem " + imageStoragePath);
+        }
     }
 }

@@ -17,11 +17,13 @@ spring:
   
   servlet:
     multipart:
-      max-file-size: 10MB
+      max-file-size: 15MB
       max-request-size: 50MB
 
 notification:
-  image-storage-path: ${IMAGE_STORAGE_PATH:/app/images}
+  image:
+    max-size: 10 #mb
+    storage-path: ${IMAGE_STORAGE_PATH:/app/images}
   auth:
     bearer-token: ${BEARER_TOKEN:default-token}
 
